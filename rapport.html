@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>WAGUE-SARL</title>
+
+<style>
+body { font-family: Arial; background:#fff; color:#041624; margin:0; }
+.navbar { display:flex; justify-content:space-between; padding:10px 20px; background:#030f18; color:white; }
+.navbar .logo { font-size:1.5rem; font-weight:bold; }
+.navbar ul { display:flex; gap:15px; list-style:none; margin:0; padding:0; }
+.navbar ul li a { color:white; padding:8px 15px; border-radius:5px; text-decoration:none; }
+.navbar ul li a:hover { background:white; color:#031019; }
+.menu-toggle { display:none; flex-direction:column; cursor:pointer; }
+.menu-toggle span { width:25px; height:3px; background:white; margin:3px 0; }
+
+@media(max-width:768px){
+  .menu-toggle { display:flex; }
+  .navbar ul { display:none; flex-direction:column; background:#020e17; position:absolute; top:60px; right:0; width:200px; padding:10px; }
+  .navbar ul.active { display:flex; }
+}
+
+.accordion-btn { width:95%; margin:15px auto; padding:12px; font-size:1.2rem; border:none; border-radius:8px; cursor:pointer; background:#03121d; color:white; text-align:left; }
+.accordion-content { width:95%; display:none; margin:10px auto; padding:15px; background:white; border-radius:8px; border:2px solid #04121b; }
+
+table { width:100%; border-collapse:collapse; margin-top:15px; }
+th, td { border:1px solid #030f19; padding:10px; text-align:center; }
+.total-row { background:#030f18; color:white; font-weight:bold; }
+
+.flex-container { display:flex; justify-content:space-between; gap:20px; }
+.block { width:48%; }
+@media(max-width:900px){ .flex-container{ flex-direction:column; } .block{ width:100%; } }
+
+.total-global { background:#03111c; color:white; padding:15px; margin:30px auto; width:90%; text-align:center; border-radius:10px; font-size:1.3rem; }
+
+#downloadPdfBtn { margin:20px auto; display:block; background:#03141f; color:white; padding:10px 20px; border:none; border-radius:5px; cursor:pointer; }
+#downloadPdfBtn[disabled] { opacity:0.5; cursor:not-allowed; }
+</style>
+</head>
+
+<body>
+
+<nav class="navbar">
+  <div class="logo">WAGUE-SARL </div>
+  <div class="menu-toggle" id="mobile-menu"><span></span><span></span><span></span></div>
+  <ul id="nav-links">
+    <li><a href="index.html">Accueil</a></li>
+    <li><a href="ciment.html">Ciment</a></li>
+    <li><a href="transport.html">Transport</a></li>
+    <li><a href="rapport.html">Rapport</a></li>
+    <li><a href="versement.html">Versement</a></li>
+  </ul>
+</nav>
+
+<h1 style="text-align:center; margin-top:20px;">Rapport Mensuel</h1>
+
+<button id="downloadPdfBtn" disabled>Télécharger le PDF</button>
+
+<div id="reportContainer"></div>
+
+<div class="total-global">
+TOTAL GLOBAL BÉNÉFICE : <span id="global_benef">0</span> FCFA
+</div>
+
+<!-- libs -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+<script>
+const URL_GLOBAL = "https://script.google.com/macros/s/AKfycbwRQqhRsS3vTxRos5NT1AKwa-6kbGJelHIbH_7GfpwGrCIv9HUE54kd_uyyvvvNqWVf/exec";
+
+document.getElementById("mobile-menu").onclick = () => document.getElementById("nav-links").classList.toggle("active");
+
+let cimentData = [], transportData = [];
+
+// utilitaires
+function getMonthName(m){
+  return ["Janvier","Février","Mars","Avril","Mai","Juin","Juillet",
+          "Août","Septembre","Octobre","Novembre","Décembre"][m];
+}
+
+// La fonction groupByMonth attend que chaque row.values[0] soit une string de date (avec ou sans T)
+// On normalise en prenant uniquement la partie YYYY-MM-DD pour éviter les problèmes de fuseau.
+function groupByMonth(data){
+  const result = {};
+  data.forEach(item => {
+    const row = item.values;
+    if (!row || !row[0]) return;
+    // row[0] peut être "2025-02-19" ou "2025-02-19T16:00:00.000Z"
+    const rawDateStr = String(row[0]);
+    const ymd = rawDateStr.split('T')[0]; // garde YYYY-MM-DD seulement
+    const dt = new Date(ymd + "T00:00:00"); // forcer à minuit pour éviter offset
+    if (isNaN(dt.getTime())) return; // skip si pas une date valide
+    const key = `${getMonthName(dt.getMonth())} ${dt.getFullYear()}`;
+    if (!result[key]) result[key] = [];
+    // stocke la ligne normalisée (avec date YYYY-MM-DD en index 0)
+    const normalized = [...row];
+    normalized[0] = ymd;
+    result[key].push(normalized);
+  });
+  return result;
+}
+
+// trie chronologiquement les clés "Mois YYYY"
+function sortMonths(months){
+  const monthNames = ["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
+  return months.sort((a,b)=>{
+    const [m1,y1] = a.split(' ');
+    const [m2,y2] = b.split(' ');
+    const d1 = new Date(Number(y1), monthNames.indexOf(m1));
+    const d2 = new Date(Number(y2), monthNames.indexOf(m2));
+    return d1 - d2;
+  });
+}
+
+// rendu
+function renderReport(){
+  const container = document.getElementById("reportContainer");
+  container.innerHTML = "";
+
+  const cimentByMonth = groupByMonth(cimentData);
+  const transportByMonth = groupByMonth(transportData);
+
+  const allMonths = Array.from(new Set([...Object.keys(cimentByMonth), ...Object.keys(transportByMonth)]));
+  const monthsSorted = sortMonths(allMonths);
+
+  let globalBenef = 0;
+
+  monthsSorted.forEach(month=>{
+    const cimentRows = cimentByMonth[month] || [];
+    const transportRows = transportByMonth[month] || [];
+
+    if (cimentRows.length === 0 && transportRows.length === 0) return;
+
+    const btn = document.createElement("button");
+    btn.className = "accordion-btn";
+    btn.textContent = `Rapport du mois ${month}`;
+
+    const content = document.createElement("div");
+    content.className = "accordion-content";
+
+    let tc = { tonnage:0, depense:0, benefice:0 };
+    cimentRows.forEach(r=>{
+      tc.tonnage += Number(r[1] || 0);
+      tc.depense += Number(r[4] || 0);
+      tc.benefice += Number(r[5] || 0);
+      globalBenef += Number(r[5] || 0);
+    });
+
+    let tt = { tonnage:0, depense:0, benefice:0 };
+    transportRows.forEach(r=>{
+      tt.tonnage += Number(r[1] || 0);
+      tt.depense += Number(r[3] || 0);
+      tt.benefice += Number(r[5] || 0);
+      globalBenef += Number(r[5] || 0);
+    });
+
+    content.innerHTML = `
+      <div class="flex-container">
+        <div class="block">
+          <h2>TRANSPORT</h2>
+          <table>
+            <thead><tr><th>Date</th><th>Tonnage</th><th>Dépense</th><th>Bénéfice</th></tr></thead>
+            <tbody>
+            ${transportRows.map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[3]}</td><td>${r[5]}</td></tr>`).join('')}
+            <tr class="total-row"><td>TOTAL</td><td>${tt.tonnage}</td><td>${tt.depense}</td><td>${tt.benefice}</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="block">
+          <h2>CIMENT</h2>
+          <table>
+            <thead><tr><th>Date</th><th>Tonnage</th><th>Dépense</th><th>Bénéfice</th></tr></thead>
+            <tbody>
+            ${cimentRows.map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[4]}</td><td>${r[5]}</td></tr>`).join('')}
+            <tr class="total-row"><td>TOTAL</td><td>${tc.tonnage}</td><td>${tc.depense}</td><td>${tc.benefice}</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+
+    btn.addEventListener('click', ()=> { content.style.display = content.style.display === 'block' ? 'none' : 'block'; });
+    container.appendChild(btn);
+    container.appendChild(content);
+  });
+
+  document.getElementById("global_benef").textContent = Number(globalBenef || 0).toLocaleString('fr-FR');
+}
+
+// charge données depuis Google Apps Script
+async function loadData(){
+  try{
+    // désactiver le bouton jusqu'à ce que tout soit chargé
+    const pdfBtn = document.getElementById('downloadPdfBtn');
+    pdfBtn.disabled = true;
+
+    const [cRes, tRes] = await Promise.all([
+      fetch(`${URL_GLOBAL}?type=ciment`),
+      fetch(`${URL_GLOBAL}?type=transport`)
+    ]);
+
+    if(!cRes.ok || !tRes.ok){
+      throw new Error("Erreur fetch WebApp (code réseau).");
+    }
+
+    cimentData = await cRes.json();
+    transportData = await tRes.json();
+
+    // rendu
+    renderReport();
+
+    // activer le bouton PDF maintenant
+    pdfBtn.disabled = false;
+  }catch(err){
+    console.error("Erreur loadData:", err);
+    alert("Impossible de charger les données du rapport. Vérifie la WebApp et la connexion.");
+  }
+}
+
+// Download PDF robustifié
+document.getElementById("downloadPdfBtn").addEventListener("click", async ()=> {
+  const btn = document.getElementById("downloadPdfBtn");
+  try{
+    // protection si contenu vide
+    const element = document.getElementById("reportContainer");
+    if(!element || element.children.length === 0){
+      alert("Le rapport n'est pas encore généré — attends que les données soient chargées.");
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = "Génération en cours...";
+
+    // capture
+    const canvas = await html2canvas(element, { scale: 2, useCORS: true, backgroundColor: null });
+    const imgData = canvas.toDataURL('image/png');
+
+    // Créer le PDF
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF('p', 'pt', 'a4');
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+
+    // image dimension
+    const imgProps = pdf.getImageProperties(imgData);
+    const imgW = pageWidth;
+    const imgH = (imgProps.height * imgW) / imgProps.width;
+
+    // Si l'image dépasse une page, on découpe en pages
+    if(imgH <= pageHeight){
+      pdf.addImage(imgData, 'PNG', 0, 0, imgW, imgH);
+    } else {
+      // multiple pages
+      let position = 0;
+      const canvasPage = document.createElement('canvas');
+      const ctx = canvasPage.getContext('2d');
+
+      const ratio = imgProps.width / imgW;
+      const sliceHeight = Math.floor(pageHeight * ratio);
+
+      canvasPage.width = imgProps.width;
+      canvasPage.height = sliceHeight;
+
+      let remainingHeight = imgProps.height;
+      let sourceY = 0;
+
+      while (remainingHeight > 0){
+        ctx.clearRect(0,0,canvasPage.width, canvasPage.height);
+        ctx.drawImage(canvas, 0, sourceY, imgProps.width, sliceHeight, 0, 0, canvasPage.width, canvasPage.height);
+        const pageData = canvasPage.toDataURL('image/png');
+        if(position === 0){
+          pdf.addImage(pageData, 'PNG', 0, 0, imgW, pageHeight);
+        } else {
+          pdf.addPage();
+          pdf.addImage(pageData, 'PNG', 0, 0, imgW, pageHeight);
+        }
+        sourceY += sliceHeight;
+        remainingHeight -= sliceHeight;
+        position++;
+      }
+    }
+
+    pdf.save(`rapport_sodama_${new Date().toISOString().split('T')[0]}.pdf`);
+  }catch(err){
+    console.error("Erreur génération PDF :", err);
+    alert("Erreur lors de la génération du PDF. Regarde la console pour plus de détails.");
+  }finally{
+    btn.disabled = false;
+    btn.textContent = "Télécharger le PDF";
+  }
+});
+
+// initial
+loadData();
+
+</script>
+</body>
+</html>

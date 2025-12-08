@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SODAMA - Versements</title>
+<style>
+body { font-family: Arial; margin:0; background:#f4f4f4; color:#081721;}
+.navbar { display:flex; justify-content:space-between; align-items:center; background:#03111c; padding:10px 20px; color:white;}
+.navbar .logo { font-size:1.5rem; font-weight:bold;}
+.navbar ul { display:flex; list-style:none; gap:15px; }
+.navbar ul li a { color:white; text-decoration:none; padding:8px 15px; border-radius:5px; font-weight:bold;}
+.navbar ul li a:hover { background:white; color:#041420;}
+.menu-toggle { display:none; flex-direction:column; cursor:pointer;}
+.menu-toggle span { width:25px; height:3px; background:white; margin:3px 0;}
+@media(max-width:768px){
+  .menu-toggle{display:flex;}
+  .navbar ul{display:none; flex-direction:column; background:#041622; width:200px; position:absolute; top:60px; right:0; padding:10px;}
+  .navbar ul.active{display:flex;}
+}
+.container { width:95%; max-width:900px; margin:20px auto; background:white; padding:20px; border-radius:10px; }
+h2 { text-align:center; margin-bottom:20px; }
+input, select, textarea, button { width:100%; padding:10px; margin:8px 0; border-radius:5px; border:1px solid #aaa; }
+button { background:#040e16; color:white; border:none; cursor:pointer; font-weight:bold; }
+button:hover { background:#04151f; }
+table { width:100%; border-collapse:collapse; margin-top:15px; }
+th, td { border:1px solid #aaa; padding:10px; text-align:center; }
+th { background:#041420; color:white; }
+.action-btn { padding:6px 10px; color:white; border:none; cursor:pointer; border-radius:4px; }
+.edit { background:orange; }
+.delete { background:red; }
+.accordion-btn { width:100%; background:#020f17; color:white; padding:12px; font-size:1.1rem; border:none; border-radius:8px; cursor:pointer; margin-top:15px; text-align:left; }
+.accordion-content { display:none; margin-top:10px; border:2px solid #05131d; padding:15px; border-radius:8px; }
+#downloadPdfBtn { margin:10px auto; display:block; background:#041724; color:white; padding:10px 20px; border:none; border-radius:5px; cursor:pointer; }
+.total-row { font-weight:bold; background:#dfeaff; }
+</style>
+</head>
+<body>
+<nav class="navbar">
+  <div class="logo">WAGUE-SARL</div>
+  <div class="menu-toggle" id="mobile-menu"><span></span><span></span><span></span></div>
+  <ul id="nav-links">
+    <li><a href="index.html">Accueil</a></li>
+    <li><a href="ciment.html">Ciment</a></li>
+    <li><a href="transport.html">Transport</a></li>
+    <li><a href="rapport.html">Rapport</a></li>
+    <li><a href="versement.html">Versement</a></li>
+  </ul>
+</nav>
+
+<div class="container">
+<h2>Gestion des Versements</h2>
+
+<label>Date :</label>
+<input type="date" id="date">
+
+<label>Type :</label>
+<select id="type">
+  <option value="ciment">Ciment</option>
+  <option value="transport">Transport</option>
+</select>
+
+<label>Montant :</label>
+<input type="number" id="montant" placeholder="Entrez le montant...">
+
+<label>Description :</label>
+<textarea id="description" rows="3"></textarea>
+
+<button type="button" id="saveBtn">Enregistrer</button>
+
+<div id="versementContainer"></div>
+<button id="downloadPdfBtn">Télécharger PDF</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+<script>
+const URL_GLOBAL = "https://script.google.com/macros/s/AKfycbwRQqhRsS3vTxRos5NT1AKwa-6kbGJelHIbH_7GfpwGrCIv9HUE54kd_uyyvvvNqWVf/exec";
+document.getElementById("mobile-menu").onclick = () => document.getElementById("nav-links").classList.toggle("active");
+
+let versements = [];
+let editRowIndex = null;
+
+function getMonthName(m){ return ["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"][m]; }
+function formatDate(d){ return new Date(d).toISOString().split('T')[0]; }
+
+async function loadVersements(){
+    const res = await fetch(`${URL_GLOBAL}?type=versement`);
+    const rows = await res.json();
+    versements = rows.map(r=>({
+        row: r.row,
+        date: r.values[0],
+        type: r.values[1],
+        montant: parseFloat(r.values[2]),
+        description: r.values[3]
+    }));
+    renderVersements();
+}
+
+function groupByMonthAndType(data){
+    let result = {};
+    data.forEach(v=>{
+        const d = new Date(v.date);
+        const monthKey = `${getMonthName(d.getMonth())} ${d.getFullYear()}`;
+        if(!result[monthKey]) result[monthKey] = { ciment: [], transport: [] };
+        result[monthKey][v.type].push(v);
+    });
+    return result;
+}
+
+function renderVersements(){
+    const container = document.getElementById("versementContainer");
+    container.innerHTML = "";
+    const grouped = groupByMonthAndType(versements);
+
+    for(const month in grouped){
+        const types = grouped[month];
+        const btn = document.createElement("button");
+        btn.className="accordion-btn";
+        btn.textContent=`Versements du mois : ${month}`;
+        const content = document.createElement("div");
+        content.className="accordion-content";
+
+        for(const typeName of ["ciment","transport"]){
+            const rows = types[typeName];
+            if(rows.length === 0) continue;
+            let totalMontant = 0;
+            let html = `<h3>${typeName.toUpperCase()}</h3><table>
+                <thead><tr><th>Date</th><th>Montant</th><th>Description</th><th>Modifier</th><th>Supprimer</th></tr></thead><tbody>`;
+            rows.forEach(v=>{
+                totalMontant += v.montant;
+                html+=`<tr>
+                    <td>${formatDate(v.date)}</td>
+                    <td>${v.montant.toLocaleString('fr-FR')} FCFA</td>
+                    <td>${v.description}</td>
+                    <td><button class="action-btn edit" onclick="editVersement(${v.row})">Modifier</button></td>
+                    <td><button class="action-btn delete" onclick="deleteVersement(${v.row})">Supprimer</button></td>
+                </tr>`;
+            });
+            html+=`<tr class="total-row"><td>Total ${typeName}</td><td>${totalMontant.toLocaleString('fr-FR')} FCFA</td><td colspan="3"></td></tr>`;
+            html+="</tbody></table>";
+            content.innerHTML += html;
+        }
+
+        btn.onclick = ()=>{ content.style.display = content.style.display==="block"?"none":"block"; };
+        container.appendChild(btn);
+        container.appendChild(content);
+    }
+}
+
+async function saveVersement(){
+    const date = document.getElementById("date").value;
+    const type = document.getElementById("type").value;
+    const montant = parseFloat(document.getElementById("montant").value);
+    const description = document.getElementById("description").value;
+
+    if(!date || !montant){ alert("Date et montant obligatoires"); return; }
+
+    const data = { date, type, montant, description };
+    let url = `${URL_GLOBAL}?type=versement`;
+    if(editRowIndex) url += `&edit=${editRowIndex}`;
+
+    await fetch(url,{ method:"POST", body:JSON.stringify(data) });
+    editRowIndex = null;
+
+    document.getElementById("date").value="";
+    document.getElementById("montant").value="";
+    document.getElementById("description").value="";
+
+    loadVersements();
+}
+
+function editVersement(row){
+    const v = versements.find(x=>x.row===row);
+    document.getElementById("date").value = v.date;
+    document.getElementById("type").value = v.type;
+    document.getElementById("montant").value = v.montant;
+    document.getElementById("description").value = v.description;
+    editRowIndex = row;
+}
+
+async function deleteVersement(row){
+    if(!confirm("Supprimer ce versement ?")) return;
+    await fetch(`${URL_GLOBAL}?type=versement&action=delete&index=${row}`);
+    loadVersements();
+}
+
+// PDF
+document.getElementById("downloadPdfBtn").onclick = async ()=>{
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF("p","pt","a4");
+    const element = document.getElementById("versementContainer");
+    const canvas = await html2canvas(element, { scale:2 });
+    const img = canvas.toDataURL("image/png");
+    const pdfWidth = doc.internal.pageSize.getWidth();
+    const pdfHeight = (canvas.height * pdfWidth)/canvas.width;
+    doc.addImage(img,"PNG",0,0,pdfWidth,pdfHeight);
+    doc.save("versements_sodama.pdf");
+};
+
+document.getElementById("saveBtn").onclick = saveVersement;
+loadVersements();
+</script>
+</body>
+</html>

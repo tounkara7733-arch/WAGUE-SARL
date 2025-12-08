@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WAGUE-SARL</title>
+
+<style>
+body { font-family: Arial; margin:0; background:#fff; color:#051827;}
+.navbar { display:flex; justify-content:space-between; align-items:center; padding:10px 20px; background:#020d16; color:white;}
+.navbar .logo { font-size:1.5rem; font-weight:bold;}
+.navbar ul { display:flex; list-style:none; gap:15px; }
+.navbar ul li a { text-decoration:none; color:white; padding:8px 15px; border-radius:5px; font-weight:bold;}
+.navbar ul li a:hover { background:white; color:#03111a;}
+.menu-toggle { display:none; flex-direction:column; cursor:pointer;}
+.menu-toggle span { width:25px; height:3px; background:white; margin:3px 0;}
+@media(max-width:768px) {
+    .menu-toggle { display:flex; }
+    .navbar ul { position:absolute; top:60px; right:0; background:#03121d; width:200px; flex-direction:column; padding:10px; display:none;}
+    .navbar ul.active { display:flex;}
+}
+h1 { text-align:center; margin:20px 0;}
+form { max-width:800px; margin:20px auto; display:flex; flex-wrap:wrap; gap:10px;}
+form input, form textarea { width:48%; padding:10px; border:1px solid #02101a; border-radius:5px;}
+form textarea { width:100%; height:80px; resize:vertical;}
+form button { width:100%; padding:10px; border:none; background:#03131e; color:white; border-radius:5px; cursor:pointer;}
+table { width:95%; margin:15px auto; border-collapse:collapse;}
+th, td { border:1px solid #030f18; padding:10px; text-align:center;}
+button.edit { background:#020512; color:white; border:none; padding:5px 10px; border-radius:5px; cursor:pointer;}
+button.delete { background:#eb2f06; color:white; border:none; padding:5px 10px; border-radius:5px; cursor:pointer;}
+.accordion-btn {width:95%; margin:15px auto; background:#020f18; color:white; padding:10px; font-size:1rem; border:none; border-radius:5px; cursor:pointer; text-align:left;}
+.accordion-content {display:none; width:95%; margin:0 auto 20px; border:1px solid #03131f; border-radius:5px; padding:10px;}
+</style>
+</head>
+
+<body>
+
+<nav class="navbar">
+    <div class="logo">WAGUE-SARL</div>
+    <div class="menu-toggle" id="mobile-menu"><span></span><span></span><span></span></div>
+    <ul id="nav-links">
+        <li><a href="index.html">Accueil</a></li>
+        <li><a href="ciment.html">Ciment</a></li>
+        <li><a href="transport.html">Transport</a></li>
+        <li><a href="rapport.html">Rapport</a></li>
+        <li><a href="versement.html">Versement</a></li>
+    </ul>
+</nav>
+
+<h1>Gestion du Transport</h1>
+
+<form id="transportForm">
+    <input type="date" id="date" required>
+    <input type="number" id="tonnage" placeholder="Tonnage" required>
+    <input type="number" id="prixUnitaire" placeholder="Prix unitaire" required>
+    <input type="number" id="depense" placeholder="Dépense" required>
+    <textarea id="description" placeholder="Description (optionnel)"></textarea>
+    <button type="submit">Enregistrer</button>
+</form>
+
+<div id="transportContainer"></div>
+
+<script>
+
+document.getElementById("mobile-menu").onclick =
+    () => document.getElementById("nav-links").classList.toggle("active");
+
+const GLOBAL_URL = "https://script.google.com/macros/s/AKfycbwRQqhRsS3vTxRos5NT1AKwa-6kbGJelHIbH_7GfpwGrCIv9HUE54kd_uyyvvvNqWVf/exec";
+
+let transportData = [];
+let editRowIndex = null;
+
+function formatFCFA(val){
+    return Number(val).toLocaleString('fr-FR') + " FCFA";
+}
+
+function getMonthKey(dateStr){
+    const d = new Date(dateStr);
+    return `${d.getMonth()+1}-${d.getFullYear()}`;
+}
+
+// Charger données
+async function loadTransportData(){
+    try{
+        const res = await fetch(`${GLOBAL_URL}?type=transport`);
+        const rows = await res.json();
+
+        transportData = rows.map(r=>({
+            sheetRow: r.row,
+            date: r.values[0],
+            tonnage: parseFloat(r.values[1]) || 0,
+            prixUnitaire: parseFloat(r.values[2]) || 0,
+            depense: parseFloat(r.values[3]) || 0,
+            description: r.values[4] || "",
+            benefice: parseFloat(r.values[5]) ||
+                      ((parseFloat(r.values[1]||0)*parseFloat(r.values[2]||0)) - parseFloat(r.values[3]||0))
+        }));
+
+        renderTable();
+    }
+    catch(e){ console.error("Erreur fetch Transport:", e); }
+}
+
+function renderTable(){
+    const container = document.getElementById("transportContainer");
+    container.innerHTML = "";
+
+    transportData.sort((a,b)=>new Date(a.date)-new Date(b.date));
+
+    const grouped = {};
+    transportData.forEach(item=>{
+        const key = getMonthKey(item.date);
+        if(!grouped[key]) grouped[key]=[];
+        grouped[key].push(item);
+    });
+
+    for(const month in grouped){
+
+        const btn = document.createElement("button");
+        btn.className="accordion-btn";
+        btn.textContent=`Mois: ${month}`;
+
+        const content = document.createElement("div");
+        content.className="accordion-content";
+
+        let tableHTML=
+        `<table>
+            <thead>
+                <tr>
+                    <th>Date</th><th>Tonnage</th><th>Prix Unitaire</th><th>Dépense</th><th>Bénéfice</th><th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>`;
+
+        grouped[month].forEach(item=>{
+            const formattedDate = item.date.split('T')[0];
+            tableHTML+=
+            `<tr>
+                <td>${formattedDate}</td>
+                <td>${item.tonnage}</td>
+                <td>${formatFCFA(item.prixUnitaire*item.tonnage)}</td>
+                <td>${formatFCFA(item.depense)}</td>
+                <td>${formatFCFA(item.benefice)}</td>
+                <td>
+                    <button class="edit" onclick="prepareEdit(${item.sheetRow})">Modifier</button>
+                    <button class="delete" onclick="deleteRow(${item.sheetRow})">Supprimer</button>
+                </td>
+            </tr>`;
+        });
+
+        tableHTML += "</tbody></table>";
+        content.innerHTML = tableHTML;
+
+        btn.onclick = () =>
+            content.style.display = content.style.display==="block" ? "none" : "block";
+
+        container.appendChild(btn);
+        container.appendChild(content);
+    }
+}
+
+function prepareEdit(sheetRow){
+    const item = transportData.find(x=>x.sheetRow===sheetRow);
+
+    document.getElementById("date").value = item.date.split('T')[0];
+    document.getElementById("tonnage").value = item.tonnage;
+    document.getElementById("prixUnitaire").value = item.prixUnitaire;
+    document.getElementById("depense").value = item.depense;
+    document.getElementById("description").value = item.description;
+
+    editRowIndex = sheetRow;
+}
+
+document.getElementById("transportForm").addEventListener("submit", async function(e){
+    e.preventDefault();
+
+    const date = document.getElementById("date").value;
+    const tonnage = parseFloat(document.getElementById("tonnage").value);
+    const prixUnitaire = parseFloat(document.getElementById("prixUnitaire").value);
+    const depense = parseFloat(document.getElementById("depense").value);
+    const description = document.getElementById("description").value;
+    const benefice = (tonnage*prixUnitaire)-depense;
+
+    const data=[date, tonnage, prixUnitaire, depense, description, benefice];
+
+    try{
+        if(editRowIndex){
+            await fetch(`${GLOBAL_URL}?type=transport&edit=${editRowIndex}`, {
+                method:"POST",
+                body:JSON.stringify(data)
+            });
+            editRowIndex=null;
+        }
+        else{
+            await fetch(`${GLOBAL_URL}?type=transport`, {
+                method:"POST",
+                body:JSON.stringify(data)
+            });
+        }
+
+        this.reset();
+        loadTransportData();
+    }
+    catch(e){ console.error("Erreur POST Transport:", e); }
+});
+
+async function deleteRow(sheetRow){
+    if(!confirm("Supprimer cette ligne ?")) return;
+    try{
+        await fetch(`${GLOBAL_URL}?type=transport&action=delete&index=${sheetRow}`);
+        loadTransportData();
+    }
+    catch(e){ console.error("Erreur DELETE Transport:", e); }
+}
+
+loadTransportData();
+
+</script>
+
+</body>
+</html>
